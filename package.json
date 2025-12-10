@@ -1,0 +1,27 @@
+{
+  "name": "responsive-mobile",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+"scripts": {
+  "client": "npm start --prefix client",
+  "server": "npm start --prefix server",
+  "dev": "concurrently \"npm run server\" \"npm run client\"",
+  "postinstall": "npm install --prefix client && npm install --prefix server"
+},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RidhamTalaviya/Responsive-Mobile.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/RidhamTalaviya/Responsive-Mobile/issues"
+  },
+  "homepage": "https://github.com/RidhamTalaviya/Responsive-Mobile#readme",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
