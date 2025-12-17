@@ -67,7 +67,7 @@ app.get("/proxy", async (req, res) => {
             }
           }
           
-          // Rewrite link to go through proxy
+          // Rewrite link to go through proxy (encode URL for query parameter)
           $(elem).attr('href', `${process.env.BASE_URL}/proxy?url=${encodeURIComponent(absoluteUrl)}`);
         }
       });
@@ -82,10 +82,12 @@ app.get("/proxy", async (req, res) => {
       </style>`;
 
       // Inject script to update parent window URL when links are clicked
+      // Escape the URL for safe use in JavaScript string
+      const escapedTargetUrl = targetUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
       const urlUpdateScript = `<script>
         (function() {
           // Update parent URL on page load
-          const currentProxiedUrl = '${targetUrl}';
+          const currentProxiedUrl = '${escapedTargetUrl}';
           try {
             const parentUrl = new URL(window.parent.location.href);
             const currentUrlParam = parentUrl.searchParams.get('url');
@@ -119,7 +121,7 @@ app.get("/proxy", async (req, res) => {
                 
                 if (actualUrl) {
                   try {
-                    // Update parent window URL
+                    // Update parent window URL (encode for query parameter)
                     window.parent.history.pushState(
                       { url: actualUrl }, 
                       '', 
