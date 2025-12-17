@@ -1,4 +1,4 @@
-# Responsive Mobile Simulator
+# VCard App Preview
 
 A web-based responsive design testing tool built with React and Vite. Test how your websites look on different devices without leaving your browser.
 

@@ -74,7 +74,7 @@ function DeviceFrame() {
     height: `${dimensions.screenHeight}px`,
   };
 
-  const proxySrc = `http://localhost:5000/proxy?url=https://vcards.infyom.com/${url}`;
+  const proxySrc = `${import.meta.env.VITE_PROXY_URL}/proxy?url=https://vcards.infyom.com/${url}`;
 
   return (
     <div className="h-screen flex flex-col bg-[#1a1a1a] font-sans text-[#e0e0e0] overflow-hidden">
