@@ -68,7 +68,7 @@ app.get("/proxy", async (req, res) => {
           }
           
           // Rewrite link to go through proxy
-          $(elem).attr('href', `http://localhost:5000/proxy?url=${encodeURIComponent(absoluteUrl)}`);
+          $(elem).attr('href', `${process.env.BASE_URL}/proxy?url=${encodeURIComponent(absoluteUrl)}`);
         }
       });
 
