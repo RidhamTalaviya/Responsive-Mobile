@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import { load } from 'cheerio'; 
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -153,6 +155,6 @@ app.get("/proxy", async (req, res) => {
   }
 });
 
-app.listen(5000, () => {
-  console.log("Proxy running on http://localhost:5000");
+app.listen(process.env.PORT, () => {
+  console.log(`Proxy running on ${process.env.BASE_URL}`);
 });
