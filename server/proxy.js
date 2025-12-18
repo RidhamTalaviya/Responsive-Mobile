@@ -1,9 +1,9 @@
+import dotenv from "dotenv";
+dotenv.config();
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import { load } from 'cheerio'; 
-import dotenv from "dotenv";
-dotenv.config();
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -66,8 +66,6 @@ app.get("/proxy", async (req, res) => {
               return; // Skip invalid URLs
             }
           }
-          
-          // Rewrite link to go through proxy (encode URL for query parameter)
           $(elem).attr('href', `${process.env.BASE_URL}/proxy?url=${encodeURIComponent(absoluteUrl)}`);
         }
       });
@@ -82,12 +80,10 @@ app.get("/proxy", async (req, res) => {
       </style>`;
 
       // Inject script to update parent window URL when links are clicked
-      // Escape the URL for safe use in JavaScript string
-      const escapedTargetUrl = targetUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
       const urlUpdateScript = `<script>
         (function() {
           // Update parent URL on page load
-          const currentProxiedUrl = '${escapedTargetUrl}';
+          const currentProxiedUrl = '${targetUrl}';
           try {
             const parentUrl = new URL(window.parent.location.href);
             const currentUrlParam = parentUrl.searchParams.get('url');
@@ -121,7 +117,7 @@ app.get("/proxy", async (req, res) => {
                 
                 if (actualUrl) {
                   try {
-                    // Update parent window URL (encode for query parameter)
+                    // Update parent window URL
                     window.parent.history.pushState(
                       { url: actualUrl }, 
                       '', 
