@@ -8,7 +8,7 @@ function DeviceFrame() {
   const url = new URL(window.location.href).searchParams.get("url");
 
 
-  console.log(url);
+  // console.log(url);
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
   useEffect(() => {
