@@ -5,7 +5,10 @@ function DeviceFrame() {
   const [scale, setScale] = useState(1);
   const [fitToScreen, setFitToScreen] = useState(true);
   const [iframeKey, setIframeKey] = useState(0); 
-  const url = new URL(window.location.href).searchParams.get("data");
+  const url = new URL(window.location.href).searchParams.get("url");
+
+
+  console.log(url);
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
   useEffect(() => {
@@ -74,7 +77,7 @@ function DeviceFrame() {
     height: `${dimensions.screenHeight}px`,
   };
 
-  const proxySrc = `${import.meta.env.VITE_PROXY_URL}/proxy?url=https://vcards.infyom.com/${url}`;
+  const proxySrc = `${import.meta.env.VITE_PROXY_URL}/proxy?url=${url}`;
 
   return (
     <div className="h-screen flex flex-col bg-[#1a1a1a] font-sans text-[#e0e0e0] overflow-hidden">
