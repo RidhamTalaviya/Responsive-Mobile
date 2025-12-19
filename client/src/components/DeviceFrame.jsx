@@ -4,10 +4,14 @@ function DeviceFrame() {
   const device = { name: 'iPhone 14 Pro Max', width: 430, height: 932, type: 'mobile' };
   const [scale, setScale] = useState(1);
   const [fitToScreen, setFitToScreen] = useState(true);
-  const [iframeKey, setIframeKey] = useState(0); 
   
-  // Initial Load
-  const url = new URL(window.location.href).searchParams.get("url");
+  // 1. STATE: Store the current target URL in state so we can update it
+  // Initialize with the current browser URL query param
+  const [currentUrl, setCurrentUrl] = useState(() => {
+    return new URL(window.location.href).searchParams.get("url");
+  });
+
+  const [iframeKey, setIframeKey] = useState(0); 
 
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -16,24 +20,45 @@ function DeviceFrame() {
     setIframeKey((prev) => prev + 1);
   }, [device.type]);
 
-  // --- UPDATED: Listen for raw URL changes ---
+  // 2. LISTENER: Handle "Back/Forward" Buttons (popstate)
+  // This detects when the user clicks the browser Back button
+  useEffect(() => {
+    const handlePopState = () => {
+      const newUrl = new URL(window.location.href).searchParams.get("url");
+      if (newUrl && newUrl !== currentUrl) {
+        setCurrentUrl(newUrl); // Update state -> Triggers re-render -> Iframe updates
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentUrl]);
+
+  // 3. LISTENER: Handle Internal Clicks (from inside iframe)
   useEffect(() => {
     const handleMessage = (event) => {
       if (event.data && event.data.type === 'URL_CHANGE') {
         const newUrl = event.data.url;
         
-        // Manual string concatenation to avoid encoding
-        // This sets the address bar to: /device?url=https://vcards.infyom.com/...
-        const newPath = `${window.location.pathname}?url=${newUrl}`;
-        
-        window.history.replaceState({}, "", newPath);
+        // Only update the address bar visual, don't force reload the iframe 
+        // (because the iframe is ALREADY at that page)
+        if (newUrl !== currentUrl) {
+            const newPath = `${window.location.pathname}?url=${newUrl}`;
+            window.history.pushState({}, "", newPath);
+            // We update the state silently so if they refresh, it's correct
+            // But strictly speaking, we don't want to re-render iframe here causing a double-load
+            // We just update the reference.
+            setCurrentUrl(newUrl);
+        }
       }
     };
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, []);
+  }, [currentUrl]);
 
+
+  // Standard Scaling Logic...
   const BEZEL = {
     mobile: { top: 8, right: 8, bottom: 8, left: 8 },
     tablet: { top: 12, right: 12, bottom: 12, left: 12 },
@@ -96,9 +121,10 @@ function DeviceFrame() {
     height: `${dimensions.screenHeight}px`,
   };
 
-  // Construct Proxy URL (Direct, no encoding on the client side if preferred)
-  // Note: We use the raw 'url' variable we got from params
-  const proxySrc = `${import.meta.env.VITE_PROXY_URL}/proxy?url=${url}`;
+  // 4. DYNAMIC SRC: Use the state variable 'currentUrl'
+  const proxySrc = currentUrl 
+    ? `${import.meta.env.VITE_PROXY_URL}/proxy?url=${currentUrl}` 
+    : '';
 
   return (
     <div className="h-screen flex flex-col bg-[#1a1a1a] font-sans text-[#e0e0e0] overflow-hidden">
@@ -113,24 +139,23 @@ function DeviceFrame() {
             className="relative shrink-0 flex justify-center"
           >
             <div className="relative w-full h-full bg-linear-to-br from-[#1a1a1a] to-[#2a2a2a] rounded-[40px] shadow-[0_20px_60px_rgba(0,0,0,0.5)] overflow-hidden">
-              {/* Notch */}
               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-[120px] h-[30px] bg-black rounded-b-[20px] z-20 shadow-sm pointer-events-none"></div>
               
-              {/* Screen */}
               <div 
                 style={screenStyle} 
                 className="absolute top-2 left-2 bg-white rounded-4xl overflow-hidden z-10"
               >
-                <iframe
-                   key={iframeKey}
-                   src={proxySrc}
-                   className="w-full h-full border-none block bg-white"
-                   title="Mobile Preview"
-                   // Removed cross-origin-isolated to prevent strict blocking
-                />
+                {/* 5. KEY PROP: Adding currentUrl to key forces React to treat it as a new page if needed */}
+                {currentUrl && (
+                    <iframe
+                    key={iframeKey + currentUrl} 
+                    src={proxySrc}
+                    className="w-full h-full border-none block bg-white"
+                    title="Mobile Preview"
+                    />
+                )}
               </div>
 
-              {/* Home Indicator */}
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full z-20 pointer-events-none"></div>
             </div>
           </div>
