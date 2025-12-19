@@ -3,7 +3,6 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
-import { load } from 'cheerio'; 
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
@@ -18,26 +17,24 @@ app.get("/proxy", async (req, res) => {
     }
 
     let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36";
-    
     if (deviceType === 'mobile') {
         userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
-    } else if (deviceType === 'tablet') {
-        userAgent = "Mozilla/5.0 (iPad; CPU OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
     }
 
     const upstream = await fetch(targetUrl, {
       headers: {
         "User-Agent": userAgent,
         "Cookie": req.headers.cookie || "",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "Referer": new URL(targetUrl).origin
       },
       redirect: 'follow'
     });
 
+    // Handle Cookies
     const rawSetCookie = upstream.headers.raw()['set-cookie'];
     if (rawSetCookie) {
         const processedCookies = rawSetCookie.map(c => 
-            c.replace(/Domain=[^;]+;?/i, '').replace(/Secure;?/i, '')
+            c.replace(/Domain=[^;]+;?/i, '').replace(/Secure;?/i, '').replace(/SameSite=[^;]+;?/i, '')
         );
         res.setHeader('Set-Cookie', processedCookies);
     }
@@ -49,94 +46,62 @@ app.get("/proxy", async (req, res) => {
       const urlObj = new URL(targetUrl);
       const origin = urlObj.origin;
 
-      // Load HTML with cheerio for manipulation
-      const $ = load(html);
-
-      // Rewrite ALL links to go through proxy
-      $('a').each((i, elem) => {
-        const href = $(elem).attr('href');
-        if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
-          let absoluteUrl = href;
-          
-          // Convert relative URLs to absolute
-          if (!href.startsWith('http')) {
-            try {
-              absoluteUrl = new URL(href, targetUrl).href;
-            } catch (e) {
-              return; // Skip invalid URLs
-            }
-          }
-          $(elem).attr('href', `${process.env.BASE_URL}/proxy?url=${encodeURIComponent(absoluteUrl)}`);
-        }
-      });
-
-      html = $.html();
-
       const baseTag = `<base href="${origin}/">`;
-      const viewportTag = `<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">`;
-      const styleTag = `<style>
+      const styleTag = `
+        <style>
          ::-webkit-scrollbar { display: none; } 
          body { -ms-overflow-style: none; scrollbar-width: none; }
-      </style>`;
+        </style>`;
 
-      // Inject script to update parent window URL when links are clicked
-      const urlUpdateScript = `<script>
+      // --- UPDATED SCRIPT FOR DIRECT URLs ---
+      const hijackScript = `
+      <script>
         (function() {
-          // Update parent URL on page load
-          const currentProxiedUrl = '${targetUrl}';
-          try {
-            const parentUrl = new URL(window.parent.location.href);
-            const currentUrlParam = parentUrl.searchParams.get('url');
-            
-            if (currentUrlParam !== currentProxiedUrl) {
-              window.parent.history.pushState(
-                { url: currentProxiedUrl }, 
-                '', 
-                '/device?url=' + encodeURIComponent(currentProxiedUrl)
-              );
-            }
-          } catch (e) {
-            console.log('Cannot access parent window');
+          const PROXY_BASE = '${process.env.BASE_URL}/proxy'; 
+          
+          function updateParent(url) {
+            try {
+               // Send the RAW url (not encoded)
+               window.parent.postMessage({ type: 'URL_CHANGE', url: url }, '*');
+            } catch(e) {}
           }
 
-          // Intercept all link clicks
           document.addEventListener('click', function(e) {
-            let target = e.target;
-            
-            // Find the closest anchor tag
-            while (target && target.tagName !== 'A') {
-              target = target.parentElement;
-            }
-            
-            if (target && target.tagName === 'A') {
-              const href = target.getAttribute('href');
-              if (href && href.includes('/proxy?url=')) {
-                // Extract the actual URL from proxy URL
-                const proxyUrl = new URL(href, window.location.href);
-                const actualUrl = proxyUrl.searchParams.get('url');
-                
-                if (actualUrl) {
-                  try {
-                    // Update parent window URL
-                    window.parent.history.pushState(
-                      { url: actualUrl }, 
-                      '', 
-                      '/device?url=' + encodeURIComponent(actualUrl)
-                    );
-                  } catch (e) {
-                    console.log('Cannot update parent URL');
-                  }
-                }
+            const link = e.target.closest('a');
+            if (link && link.href) {
+              e.preventDefault();
+              
+              const targetUrl = link.href;
+
+              if(targetUrl.startsWith('javascript:') || targetUrl.startsWith('#') || targetUrl.startsWith('mailto:')) {
+                  return; 
               }
+
+              // DIRECT URL SETTING (No encodeURIComponent)
+              // We append it directly. Note: This assumes targetUrl has no '&' meant for the proxy.
+              const newProxyUrl = PROXY_BASE + '?url=' + targetUrl;
+              
+              window.location.href = newProxyUrl;
+              updateParent(targetUrl);
             }
+          }, true);
+
+          document.addEventListener('submit', function(e) {
+            const form = e.target;
+            e.preventDefault();
+            const action = form.getAttribute('action') || '';
+            const resolvedAction = new URL(action, '${origin}').href;
+            
+            // DIRECT URL SETTING
+            window.location.href = PROXY_BASE + '?url=' + resolvedAction;
           }, true);
         })();
       </script>`;
 
       if (html.includes("<head")) {
-        html = html.replace("<head>", `<head>${baseTag}${viewportTag}${styleTag}${urlUpdateScript}`);
+        html = html.replace("<head>", `<head>${baseTag}${styleTag}${hijackScript}`);
       } else {
-        html = `${baseTag}${viewportTag}${styleTag}${urlUpdateScript}` + html;
+        html = `${baseTag}${styleTag}${hijackScript}` + html;
       }
 
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -148,11 +113,11 @@ app.get("/proxy", async (req, res) => {
     return res.send(Buffer.from(buffer));
 
   } catch (err) {
-    console.error("Proxy Error:", err.message);
-    return res.status(500).send(`Proxy Error: ${err.message}`);
+    // console.error("Proxy Error:", err.message);
+    res.status(500).send("Proxy Error");
   }
 });
 
-app.listen(process.env.PORT, () => {
+app.listen(process.env.PORT || 3000, () => {
   console.log(`Proxy running on ${process.env.BASE_URL}`);
 });

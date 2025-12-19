@@ -5,14 +5,34 @@ function DeviceFrame() {
   const [scale, setScale] = useState(1);
   const [fitToScreen, setFitToScreen] = useState(true);
   const [iframeKey, setIframeKey] = useState(0); 
+  
+  // Initial Load
   const url = new URL(window.location.href).searchParams.get("url");
-
 
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
+
   useEffect(() => {
     setIframeKey((prev) => prev + 1);
-  }, [ device.type]);
+  }, [device.type]);
+
+  // --- UPDATED: Listen for raw URL changes ---
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data && event.data.type === 'URL_CHANGE') {
+        const newUrl = event.data.url;
+        
+        // Manual string concatenation to avoid encoding
+        // This sets the address bar to: /device?url=https://vcards.infyom.com/...
+        const newPath = `${window.location.pathname}?url=${newUrl}`;
+        
+        window.history.replaceState({}, "", newPath);
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
 
   const BEZEL = {
     mobile: { top: 8, right: 8, bottom: 8, left: 8 },
@@ -76,54 +96,46 @@ function DeviceFrame() {
     height: `${dimensions.screenHeight}px`,
   };
 
+  // Construct Proxy URL (Direct, no encoding on the client side if preferred)
+  // Note: We use the raw 'url' variable we got from params
   const proxySrc = `${import.meta.env.VITE_PROXY_URL}/proxy?url=${url}`;
-
-  console.log(proxySrc , "proxySrc");
 
   return (
     <div className="h-screen flex flex-col bg-[#1a1a1a] font-sans text-[#e0e0e0] overflow-hidden">
-      
       <div className="flex-1 flex overflow-hidden justify-center">
-        
-        <div className="flex-1 flex items-center justify-center bg-[#1a1a1a] p-5 overflow-auto"></div>
-    <div 
-      ref={containerRef} 
-      className="w-full h-full flex flex-col items-center justify-center relative overflow-hidden bg-[#1e1e1e] p-10 box-border"
-    >
-      
-      {/* FRAME WRAPPER: Handles the scaling transform */}
-      <div 
-        ref={wrapperRef} 
-        style={frameStyle}
-        className="relative shrink-0 flex justify-center"
-      >
-        
-        
-          <div className="relative w-full h-full bg-linear-to-br from-[#1a1a1a] to-[#2a2a2a] rounded-[40px] shadow-[0_20px_60px_rgba(0,0,0,0.5)] overflow-hidden">
-            {/* Notch */}
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 w-[120px] h-[30px] bg-black rounded-b-[20px] z-20 shadow-sm pointer-events-none"></div>
-            
-            {/* Screen */}
-            <div 
-              style={screenStyle} 
-              className="absolute top-2 left-2 bg-red-500 rounded-4xl overflow-hidden z-10"
-            >
-              <iframe
-                 key={iframeKey}
-                 src={proxySrc}
-                 className="w-full h-full border-none block bg-white"
-                 title="Mobile Preview"
-                 allow="cross-origin-isolated" 
-              />
+        <div 
+          ref={containerRef} 
+          className="w-full h-full flex flex-col items-center justify-center relative overflow-hidden bg-[#1e1e1e] p-10 box-border"
+        >
+          <div 
+            ref={wrapperRef} 
+            style={frameStyle}
+            className="relative shrink-0 flex justify-center"
+          >
+            <div className="relative w-full h-full bg-linear-to-br from-[#1a1a1a] to-[#2a2a2a] rounded-[40px] shadow-[0_20px_60px_rgba(0,0,0,0.5)] overflow-hidden">
+              {/* Notch */}
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 w-[120px] h-[30px] bg-black rounded-b-[20px] z-20 shadow-sm pointer-events-none"></div>
+              
+              {/* Screen */}
+              <div 
+                style={screenStyle} 
+                className="absolute top-2 left-2 bg-white rounded-4xl overflow-hidden z-10"
+              >
+                <iframe
+                   key={iframeKey}
+                   src={proxySrc}
+                   className="w-full h-full border-none block bg-white"
+                   title="Mobile Preview"
+                   // Removed cross-origin-isolated to prevent strict blocking
+                />
+              </div>
+
+              {/* Home Indicator */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full z-20 pointer-events-none"></div>
             </div>
-
-            {/* Home Indicator */}
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[134px] h-[5px] bg-white/30 rounded-full z-20 pointer-events-none"></div>
           </div>
+        </div>
       </div>
-      </div>
-      </div>
-
     </div>
   );
 }
