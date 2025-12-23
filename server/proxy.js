@@ -30,7 +30,6 @@ app.get("/proxy", async (req, res) => {
       redirect: 'follow'
     });
 
-    // Handle Cookies
     const rawSetCookie = upstream.headers.raw()['set-cookie'];
     if (rawSetCookie) {
         const processedCookies = rawSetCookie.map(c => 
@@ -46,55 +45,145 @@ app.get("/proxy", async (req, res) => {
       const urlObj = new URL(targetUrl);
       const origin = urlObj.origin;
 
-      const baseTag = `<base href="${origin}/">`;
+      const baseTag = `<base href="${targetUrl}">`;
       const styleTag = `
         <style>
          ::-webkit-scrollbar { display: none; } 
          body { -ms-overflow-style: none; scrollbar-width: none; }
         </style>`;
 
-      // --- UPDATED SCRIPT FOR DIRECT URLs ---
       const hijackScript = `
       <script>
         (function() {
           const PROXY_BASE = '${process.env.BASE_URL}/proxy'; 
+          const CURRENT_URL = '${targetUrl}';
+          const CURRENT_ORIGIN = '${origin}';
           
-          function updateParent(url) {
+          // Store path segment in sessionStorage for this origin
+          let storedSegment = sessionStorage.getItem('pathSegment_' + CURRENT_ORIGIN);
+          
+          function updateParent(url, previousUrl) {
             try {
-               // Send the RAW url (not encoded)
-               window.parent.postMessage({ type: 'URL_CHANGE', url: url }, '*');
+               window.parent.postMessage({ 
+                 type: 'URL_CHANGE', 
+                 url: url,
+                 previousUrl: previousUrl || CURRENT_URL
+               }, '*');
             } catch(e) {}
           }
 
+          function navigateToUrl(targetUrl) {
+            try {
+              const resolvedUrl = new URL(targetUrl, CURRENT_URL).href;
+              const newProxyUrl = PROXY_BASE + '?url=' + resolvedUrl;
+              
+              updateParent(resolvedUrl, CURRENT_URL);
+              
+              setTimeout(() => {
+                window.location.href = newProxyUrl;
+              }, 10);
+            } catch(e) {
+              console.error('Navigation error:', e);
+            }
+          }
+
+          // Store path segment when navigating away from deeper pages
+          function storePathSegment(url) {
+            try {
+              const urlObj = new URL(url);
+              if (urlObj.origin === CURRENT_ORIGIN) {
+                const pathSegments = urlObj.pathname.split('/').filter(s => s);
+                if (pathSegments.length > 0) {
+                  const firstSegment = pathSegments[0];
+                  sessionStorage.setItem('pathSegment_' + CURRENT_ORIGIN, firstSegment);
+                  storedSegment = firstSegment;
+                }
+              }
+            } catch(e) {}
+          }
+
+          // Intercept ALL link clicks
           document.addEventListener('click', function(e) {
             const link = e.target.closest('a');
             if (link && link.href) {
               e.preventDefault();
+              e.stopPropagation();
+              e.stopImmediatePropagation();
               
-              const targetUrl = link.href;
+              let targetUrl = link.href;
 
-              if(targetUrl.startsWith('javascript:') || targetUrl.startsWith('#') || targetUrl.startsWith('mailto:')) {
+              if(targetUrl.startsWith('javascript:') || 
+                 targetUrl.startsWith('#') || 
+                 targetUrl.startsWith('mailto:') ||
+                 targetUrl.startsWith('tel:')) {
                   return; 
               }
 
-              // DIRECT URL SETTING (No encodeURIComponent)
-              // We append it directly. Note: This assumes targetUrl has no '&' meant for the proxy.
-              const newProxyUrl = PROXY_BASE + '?url=' + targetUrl;
-              
-              window.location.href = newProxyUrl;
-              updateParent(targetUrl);
+              // Check if this is a "back to base" navigation
+              try {
+                const targetUrlObj = new URL(targetUrl);
+                const currentUrlObj = new URL(CURRENT_URL);
+                
+                // If going from a deep page (e.g., /flower-garden/blog/987) to base (/)
+                if (targetUrlObj.origin === currentUrlObj.origin && 
+                    targetUrlObj.pathname === '/' && 
+                    currentUrlObj.pathname !== '/') {
+                  
+                  // Store current path segment
+                  storePathSegment(CURRENT_URL);
+                  
+                  // If we have a stored segment, navigate to that instead
+                  if (storedSegment) {
+                    const smartBackUrl = targetUrlObj.origin + '/' + storedSegment;
+                    navigateToUrl(smartBackUrl);
+                    return;
+                  }
+                }
+              } catch(e) {}
+
+              navigateToUrl(targetUrl);
             }
           }, true);
 
+          // Intercept form submissions
           document.addEventListener('submit', function(e) {
             const form = e.target;
             e.preventDefault();
-            const action = form.getAttribute('action') || '';
-            const resolvedAction = new URL(action, '${origin}').href;
+            e.stopPropagation();
             
-            // DIRECT URL SETTING
-            window.location.href = PROXY_BASE + '?url=' + resolvedAction;
+            const action = form.getAttribute('action') || CURRENT_URL;
+            navigateToUrl(action);
           }, true);
+
+          // Intercept window.location changes
+          const originalLocationHref = Object.getOwnPropertyDescriptor(window.Location.prototype, 'href');
+          
+          Object.defineProperty(window.location, 'href', {
+            get: () => originalLocationHref.get.call(window.location),
+            set: (url) => {
+              try {
+                const targetUrlObj = new URL(url, CURRENT_URL);
+                const currentUrlObj = new URL(CURRENT_URL);
+                
+                if (targetUrlObj.origin === currentUrlObj.origin && 
+                    targetUrlObj.pathname === '/' && 
+                    currentUrlObj.pathname !== '/') {
+                  
+                  storePathSegment(CURRENT_URL);
+                  
+                  if (storedSegment) {
+                    const smartBackUrl = targetUrlObj.origin + '/' + storedSegment;
+                    navigateToUrl(smartBackUrl);
+                    return;
+                  }
+                }
+                
+                navigateToUrl(url);
+              } catch(e) {
+                originalLocationHref.set.call(window.location, url);
+              }
+            }
+          });
         })();
       </script>`;
 
@@ -113,7 +202,7 @@ app.get("/proxy", async (req, res) => {
     return res.send(Buffer.from(buffer));
 
   } catch (err) {
-    // console.error("Proxy Error:", err.message);
+    console.error("Proxy Error:", err.message);
     res.status(500).send("Proxy Error");
   }
 });

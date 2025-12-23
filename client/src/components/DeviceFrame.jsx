@@ -5,60 +5,140 @@ function DeviceFrame() {
   const [scale, setScale] = useState(1);
   const [fitToScreen, setFitToScreen] = useState(true);
   
-  // 1. STATE: Store the current target URL in state so we can update it
-  // Initialize with the current browser URL query param
+  const [history, setHistory] = useState(() => {
+    const urlParam = new URL(window.location.href).searchParams.get("url");
+    return urlParam ? [urlParam] : [];
+  });
+  const [historyIndex, setHistoryIndex] = useState(0);
   const [currentUrl, setCurrentUrl] = useState(() => {
     return new URL(window.location.href).searchParams.get("url");
   });
 
   const [iframeKey, setIframeKey] = useState(0); 
-
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
+  const isNavigatingRef = useRef(false);
+
+  // Store path segments for intelligent back navigation
+  const pathSegmentsRef = useRef(new Map());
 
   useEffect(() => {
     setIframeKey((prev) => prev + 1);
   }, [device.type]);
 
-  // 2. LISTENER: Handle "Back/Forward" Buttons (popstate)
-  // This detects when the user clicks the browser Back button
+  // Handle browser back/forward buttons
   useEffect(() => {
-    const handlePopState = () => {
-      const newUrl = new URL(window.location.href).searchParams.get("url");
-      if (newUrl && newUrl !== currentUrl) {
-        setCurrentUrl(newUrl); // Update state -> Triggers re-render -> Iframe updates
+    const handlePopState = (e) => {
+      if (e.state && e.state.historyIndex !== undefined) {
+        setHistoryIndex(e.state.historyIndex);
+        setCurrentUrl(e.state.url);
+      } else {
+        const newUrl = new URL(window.location.href).searchParams.get("url");
+        if (newUrl) {
+          const existingIndex = history.indexOf(newUrl);
+          if (existingIndex !== -1) {
+            setHistoryIndex(existingIndex);
+            setCurrentUrl(newUrl);
+          }
+        }
       }
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [currentUrl]);
+  }, [history]);
 
-  // 3. LISTENER: Handle Internal Clicks (from inside iframe)
+  // Handle navigation from iframe
   useEffect(() => {
     const handleMessage = (event) => {
       if (event.data && event.data.type === 'URL_CHANGE') {
         const newUrl = event.data.url;
+        const previousUrl = event.data.previousUrl;
         
-        // Only update the address bar visual, don't force reload the iframe 
-        // (because the iframe is ALREADY at that page)
-        if (newUrl !== currentUrl) {
-            const newPath = `${window.location.pathname}?url=${newUrl}`;
-            window.history.pushState({}, "", newPath);
-            // We update the state silently so if they refresh, it's correct
-            // But strictly speaking, we don't want to re-render iframe here causing a double-load
-            // We just update the reference.
-            setCurrentUrl(newUrl);
+        if (newUrl !== currentUrl && !isNavigatingRef.current) {
+          isNavigatingRef.current = true;
+          
+          // Store path segment relationship
+          if (previousUrl) {
+            try {
+              const prevUrlObj = new URL(previousUrl);
+              const newUrlObj = new URL(newUrl);
+              
+              if (prevUrlObj.origin === newUrlObj.origin) {
+                const prevPath = prevUrlObj.pathname;
+                const newPath = newUrlObj.pathname;
+                
+                // Extract first segment from previous URL
+                const prevSegments = prevPath.split('/').filter(s => s);
+                if (prevSegments.length > 0) {
+                  const firstSegment = prevSegments[0];
+                  pathSegmentsRef.current.set(prevUrlObj.origin, firstSegment);
+                }
+              }
+            } catch (e) {
+              console.error('Error storing path segment:', e);
+            }
+          }
+          
+          setHistory(prev => {
+            const newHistory = [...prev.slice(0, historyIndex + 1), newUrl];
+            return newHistory;
+          });
+          
+          const newIndex = historyIndex + 1;
+          setHistoryIndex(newIndex);
+          setCurrentUrl(newUrl);
+          
+          const newPath = `${window.location.pathname}?url=${newUrl}`;
+          window.history.pushState(
+            { url: newUrl, historyIndex: newIndex }, 
+            "", 
+            newPath
+          );
+          
+          setTimeout(() => {
+            isNavigatingRef.current = false;
+          }, 100);
+        }
+      } else if (event.data && event.data.type === 'BACK_TO_BASE') {
+        // Handle smart back navigation
+        const baseUrl = event.data.baseUrl;
+        const storedSegment = pathSegmentsRef.current.get(baseUrl);
+        
+        if (storedSegment) {
+          const smartBackUrl = `${baseUrl}/${storedSegment}`;
+          
+          if (smartBackUrl !== currentUrl && !isNavigatingRef.current) {
+            isNavigatingRef.current = true;
+            
+            setHistory(prev => {
+              const newHistory = [...prev.slice(0, historyIndex + 1), smartBackUrl];
+              return newHistory;
+            });
+            
+            const newIndex = historyIndex + 1;
+            setHistoryIndex(newIndex);
+            setCurrentUrl(smartBackUrl);
+            
+            const newPath = `${window.location.pathname}?url=${smartBackUrl}`;
+            window.history.pushState(
+              { url: smartBackUrl, historyIndex: newIndex }, 
+              "", 
+              newPath
+            );
+            
+            setTimeout(() => {
+              isNavigatingRef.current = false;
+            }, 100);
+          }
         }
       }
     };
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [currentUrl]);
+  }, [currentUrl, historyIndex]);
 
-
-  // Standard Scaling Logic...
   const BEZEL = {
     mobile: { top: 8, right: 8, bottom: 8, left: 8 },
     tablet: { top: 12, right: 12, bottom: 12, left: 12 },
@@ -121,7 +201,6 @@ function DeviceFrame() {
     height: `${dimensions.screenHeight}px`,
   };
 
-  // 4. DYNAMIC SRC: Use the state variable 'currentUrl'
   const proxySrc = currentUrl 
     ? `${import.meta.env.VITE_PROXY_URL}/proxy?url=${currentUrl}` 
     : '';
@@ -138,21 +217,20 @@ function DeviceFrame() {
             style={frameStyle}
             className="relative shrink-0 flex justify-center"
           >
-            <div className="relative w-full h-full bg-linear-to-br from-[#1a1a1a] to-[#2a2a2a] rounded-[40px] shadow-[0_20px_60px_rgba(0,0,0,0.5)] overflow-hidden">
+            <div className="relative w-full h-full bg-gradient-to-br from-[#1a1a1a] to-[#2a2a2a] rounded-[40px] shadow-[0_20px_60px_rgba(0,0,0,0.5)] overflow-hidden">
               <div className="absolute top-2 left-1/2 -translate-x-1/2 w-[120px] h-[30px] bg-black rounded-b-[20px] z-20 shadow-sm pointer-events-none"></div>
               
               <div 
                 style={screenStyle} 
-                className="absolute top-2 left-2 bg-white rounded-4xl overflow-hidden z-10"
+                className="absolute top-2 left-2 bg-white rounded-[32px] overflow-hidden z-10"
               >
-                {/* 5. KEY PROP: Adding currentUrl to key forces React to treat it as a new page if needed */}
                 {currentUrl && (
-                    <iframe
+                  <iframe
                     key={iframeKey + currentUrl} 
                     src={proxySrc}
                     className="w-full h-full border-none block bg-white"
                     title="Mobile Preview"
-                    />
+                  />
                 )}
               </div>
 
